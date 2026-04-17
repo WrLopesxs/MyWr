@@ -1,5 +1,31 @@
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const html = document.documentElement;
+const mobileQuery = window.matchMedia("(max-width: 860px)");
+const coarsePointerQuery = window.matchMedia("(hover: none), (pointer: coarse)");
+
+function isPhoneDevice() {
+  const ua = navigator.userAgent || navigator.vendor || "";
+  const hasMobileUA = /Android|webOS|iPhone|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua);
+  const hasTouchPoints = (navigator.maxTouchPoints || 0) > 0;
+  const narrowViewport = Math.min(window.innerWidth, window.innerHeight) <= 900;
+  return hasMobileUA || (hasTouchPoints && narrowViewport) || (coarsePointerQuery.matches && narrowViewport) || mobileQuery.matches;
+}
+
+function isMobileOptimizedMode() {
+  return html.classList.contains("mobile-optimized");
+}
+
+function applyDeviceOptimizationMode() {
+  html.classList.toggle("mobile-optimized", isPhoneDevice());
+}
+
+function initDeviceOptimizationWatchers() {
+  const apply = () => applyDeviceOptimizationMode();
+  mobileQuery.addEventListener?.("change", apply);
+  coarsePointerQuery.addEventListener?.("change", apply);
+  window.addEventListener("orientationchange", apply, { passive: true });
+  window.addEventListener("resize", apply, { passive: true });
+}
 
 // THEME
 function getThemeIcon(theme) {
@@ -51,7 +77,7 @@ function initThemeToggle() {
     html.classList.add("theme-transitioning");
     applyTheme(nextTheme);
 
-    if (window.gsap) {
+    if (window.gsap && !isMobileOptimizedMode()) {
       gsap.fromTo(icon, { rotation: 0 }, { rotation: 360, duration: 0.5, ease: "power2.inOut" });
     }
 
@@ -66,7 +92,7 @@ function initLoader() {
   const loader = document.querySelector("[data-loader]");
   if (!loader) return;
 
-  if (!window.gsap || prefersReducedMotion) {
+  if (!window.gsap || prefersReducedMotion || isMobileOptimizedMode()) {
     loader.remove();
     return;
   }
@@ -131,7 +157,7 @@ function initCustomCursor() {
     isInteractive: false
   };
 
-  const interactiveSelector = "a, button, [data-lightbox], .feature-card, .project-card, .difference-card, .tech-pill";
+  const interactiveSelector = "a, button, [data-lightbox], .feature-card, .project-card, .difference-card";
 
   const setInteractive = (value) => {
     state.isInteractive = value;
@@ -205,9 +231,87 @@ function initMobileMenu() {
   });
 }
 
+// NAV HEADER
+function initNavHeader() {
+  if (isMobileOptimizedMode()) return;
+
+  const nav = document.querySelector("[data-nav-header]");
+  const cursor = document.querySelector("[data-nav-cursor]");
+  const items = document.querySelectorAll(".nav-header__item");
+
+  if (!nav || !cursor || !items.length) return;
+
+  const showCursor = (item) => {
+    const width = item.offsetWidth;
+    const left = item.offsetLeft;
+
+    cursor.style.width = `${width}px`;
+    cursor.style.transform = `translateX(${left}px)`;
+    cursor.style.opacity = "1";
+  };
+
+  items.forEach((item) => {
+    item.addEventListener("mouseenter", () => showCursor(item));
+    item.addEventListener("focusin", () => showCursor(item));
+  });
+
+  nav.addEventListener("mouseleave", () => {
+    cursor.style.opacity = "0";
+  });
+
+  nav.addEventListener("focusout", (event) => {
+    if (!nav.contains(event.relatedTarget)) {
+      cursor.style.opacity = "0";
+    }
+  });
+}
+
+// PAPER SHADERS
+function initPaperShaderBackground() {
+  const root = document.querySelector("[data-paper-shader]");
+  if (!root) return;
+
+  if (isMobileOptimizedMode()) {
+    root.style.setProperty("--shader-x", "50%");
+    root.style.setProperty("--shader-y", "30%");
+    root.style.setProperty("--shader-time", "0.35");
+    return;
+  }
+
+  const orbs = root.querySelectorAll(".paper-shader-bg__orb");
+  const pointer = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.3 };
+  const smooth = { x: pointer.x, y: pointer.y };
+
+  window.addEventListener("pointermove", (event) => {
+    pointer.x = event.clientX;
+    pointer.y = event.clientY;
+  }, { passive: true });
+
+  const render = (now) => {
+    const time = now * 0.00008;
+
+    smooth.x += (pointer.x - smooth.x) * 0.035;
+    smooth.y += (pointer.y - smooth.y) * 0.035;
+
+    root.style.setProperty("--shader-x", `${(smooth.x / window.innerWidth) * 100}%`);
+    root.style.setProperty("--shader-y", `${(smooth.y / window.innerHeight) * 100}%`);
+    root.style.setProperty("--shader-time", String((Math.sin(time) + 1) * 0.5));
+
+    orbs.forEach((orb, index) => {
+      const driftX = Math.sin(time * (index + 1.2) * 8) * (18 + index * 6);
+      const driftY = Math.cos(time * (index + 1.5) * 7) * (14 + index * 5);
+      orb.style.transform = `translate3d(${driftX}px, ${driftY}px, 0)`;
+    });
+
+    requestAnimationFrame(render);
+  };
+
+  requestAnimationFrame(render);
+}
+
 // HERO TILT
 function initTiltCards() {
-  if (prefersReducedMotion) return;
+  if (prefersReducedMotion || isMobileOptimizedMode()) return;
 
   document.querySelectorAll("[data-tilt-card]").forEach((card) => {
     const onMove = (event) => {
@@ -229,9 +333,76 @@ function initTiltCards() {
   });
 }
 
+// SPOTLIGHT CARDS
+function initSpotlightCards() {
+  const cards = document.querySelectorAll(".spotlight-card");
+  if (!cards.length) return;
+
+  const colorMap = {
+    blue: { base: 220, spread: 200 },
+    purple: { base: 280, spread: 300 },
+    green: { base: 120, spread: 200 },
+    red: { base: 0, spread: 200 },
+    orange: { base: 30, spread: 200 }
+  };
+
+  cards.forEach((card, index) => {
+    if (!card.querySelector(".spotlight-card__border")) {
+      const border = document.createElement("span");
+      border.className = "spotlight-card__border";
+      border.setAttribute("aria-hidden", "true");
+      card.prepend(border);
+    }
+
+    if (!card.querySelector(".spotlight-card__glow")) {
+      const glow = document.createElement("span");
+      glow.className = "spotlight-card__glow";
+      glow.setAttribute("aria-hidden", "true");
+      card.prepend(glow);
+    }
+
+    const palette = index % 5 === 0
+      ? colorMap.blue
+      : index % 5 === 1
+        ? colorMap.purple
+        : index % 5 === 2
+          ? colorMap.green
+          : index % 5 === 3
+            ? colorMap.orange
+            : colorMap.red;
+
+    card.style.setProperty("--base", String(palette.base));
+    card.style.setProperty("--spread", String(palette.spread));
+    if (isMobileOptimizedMode()) {
+      card.style.setProperty("--x", String(window.innerWidth * 0.5));
+      card.style.setProperty("--y", String(window.innerHeight * 0.3));
+      card.style.setProperty("--xp", "0.5");
+      card.style.setProperty("--yp", "0.3");
+    }
+  });
+
+  if (isMobileOptimizedMode()) return;
+
+  const syncPointer = (event) => {
+    const x = event.clientX;
+    const y = event.clientY;
+    const xp = (x / window.innerWidth).toFixed(3);
+    const yp = (y / window.innerHeight).toFixed(3);
+
+    cards.forEach((card) => {
+      card.style.setProperty("--x", x.toFixed(2));
+      card.style.setProperty("--y", y.toFixed(2));
+      card.style.setProperty("--xp", xp);
+      card.style.setProperty("--yp", yp);
+    });
+  };
+
+  document.addEventListener("pointermove", syncPointer, { passive: true });
+}
+
 // PARALLAX
 function initAdvancedParallax() {
-  if (prefersReducedMotion) return;
+  if (prefersReducedMotion || isMobileOptimizedMode()) return;
 
   const layers = [...document.querySelectorAll("[data-parallax-layer]")];
   if (!layers.length) return;
@@ -330,7 +501,7 @@ function initCounters() {
   const counters = document.querySelectorAll("[data-counter]");
   if (!counters.length) return;
 
-  if (!window.gsap || !window.ScrollTrigger || prefersReducedMotion) {
+  if (!window.gsap || !window.ScrollTrigger || prefersReducedMotion || isMobileOptimizedMode()) {
     counters.forEach((counter) => {
       const suffix = counter.dataset.suffix || "";
       counter.textContent = `${counter.dataset.target}${suffix}`;
@@ -364,6 +535,49 @@ function initCounters() {
   });
 }
 
+// FOOTER
+function initFooterMotion() {
+  const footer = document.querySelector("[data-footer-stage]");
+  const card = document.querySelector("[data-footer-card]");
+  const links = document.querySelectorAll("[data-footer-links] .footer-block, [data-footer-bottom]");
+
+  if (!footer || !card || !window.gsap || !window.ScrollTrigger || prefersReducedMotion || isMobileOptimizedMode()) return;
+
+  gsap.fromTo(
+    card,
+    { y: 40, opacity: 0.35 },
+    {
+      y: 0,
+      opacity: 1,
+      duration: 0.8,
+      ease: "power3.out",
+      scrollTrigger: {
+        trigger: footer,
+        start: "top 85%",
+        end: "top 40%",
+        scrub: 1
+      }
+    }
+  );
+
+  gsap.fromTo(
+    links,
+    { y: 32, opacity: 0.2 },
+    {
+      y: 0,
+      opacity: 1,
+      stagger: 0.08,
+      ease: "power2.out",
+      scrollTrigger: {
+        trigger: footer,
+        start: "top 75%",
+        end: "bottom bottom",
+        scrub: 1
+      }
+    }
+  );
+}
+
 // FALLBACK
 function showStaticState() {
   document.querySelectorAll(".reveal, [data-stagger-group] > *, .reveal-media-right, .reveal-media-left, .word").forEach((element) => {
@@ -383,17 +597,17 @@ function initAnimations() {
     return;
   }
 
-  if (prefersReducedMotion) {
+  if (prefersReducedMotion || isMobileOptimizedMode()) {
     showStaticState();
     return;
   }
 
   gsap.registerPlugin(ScrollTrigger);
 
-  gsap.set(".reveal", { opacity: 0.25, y: 24 });
-  gsap.set(".reveal-media-right", { opacity: 0.25, x: 24 });
-  gsap.set(".reveal-media-left", { opacity: 0.25, x: -24 });
-  gsap.set("[data-stagger-group] > *", { opacity: 0.25, y: 24 });
+  gsap.set(".reveal", { opacity: 0, y: 24 });
+  gsap.set(".reveal-media-right", { opacity: 0, x: 24 });
+  gsap.set(".reveal-media-left", { opacity: 0, x: -24 });
+  gsap.set("[data-stagger-group] > *", { opacity: 0, y: 24 });
   gsap.set(".section-divider", { scaleX: 0 });
 
   // HERO
@@ -508,17 +722,23 @@ function initAnimations() {
 
 // APP
 function initApp() {
+  applyDeviceOptimizationMode();
+  initDeviceOptimizationWatchers();
   splitWords("hero");
   initLoader();
   initThemeToggle();
   initHeader();
+  initPaperShaderBackground();
   initCustomCursor();
   initMobileMenu();
+  initNavHeader();
   initTiltCards();
+  initSpotlightCards();
   initAdvancedParallax();
   initLightbox();
   initCounters();
   initAnimations();
+  initFooterMotion();
 }
 
 initApp();
